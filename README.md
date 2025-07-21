@@ -170,5 +170,16 @@ sequenceDiagram
     Validator->>Client: Validation result
 ```
 
+## Language-Specific Validators
+
+We provide validator implementations in multiple programming languages. These can be found in the `license_validator/snippets` directory:
+
+- Python: `python_validator.py`
+- JavaScript: `javascript_validator.js`
+- TypeScript: `typescript_validator.ts`
+- Go: `go_validator.go`
+
+Each file contains a function `validateLicense` that can be integrated into your application. Example usage for each language is provided in the respective file.
+
 ## Support
 For issues and feature requests, open an issue in our [GitHub repository](https://github.com/tgkirupakaran/mei-paguppaaivu).

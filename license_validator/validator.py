@@ -15,12 +15,11 @@ MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDH9uW8dTdLm8Oc
 
 from license_validator.config import settings
 
-def validate(license_path: str = None) -> bool:
+def validate(license_path: str = None, trusted_public_key: str = None) -> bool:
     # Use configured path if not specified
     license_path = license_path or settings.LICENSE_FILE_PATH
-    trusted_public_key = os.getenv("TRUSTED_PUBLIC_KEY")
     if not trusted_public_key:
-        logger.error("TRUSTED_PUBLIC_KEY environment variable not set")
+        logger.error("Trusted public key not provided")
         return False
         
     try:
