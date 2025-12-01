@@ -1,87 +1,22 @@
-# Byte-compiled / optimized / DLL files
+# Python-generated files
 __pycache__/
-*.py[cod]
-*$py.class
+-p/
 
-# C extensions
-*.so
-
-# Distribution / packaging
-build/
-dist/
-*.egg-info/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-develop-eggs/
-downloads/
-pip-wheel-metadata/
-*.egg
-.installed.cfg
-
-# Installer logs
-pip-log.txt
-pip-delete-this-directory.txt
-
-# Virtual environment
-.env/
+# Virtual environments
 .venv/
 venv/
-ENV/
-env/
-env.bak/
-venv.bak/
 
-# Jupyter Notebooks
-.ipynb_checkpoints/
+*.py[oc]
+dist/
+wheels/
+*.egg-info
 
-# pytest
-.pytest_cache/
-.coverage
-htmlcov/
-.tox/
+# Svelte
+node_modules/
+.svelte-kit/
+# Virtual environments
+.venv
+uv.lock
+.python-version
 
-# mypy
-.mypy_cache/
-
-# Pyre
-.pyre/
-
-# Pyright
-pyrightconfig.json
-
-# VS Code
-.vscode/
-
-# Editor settings
-*.swp
-*.swo
-.idea/
-*.bak
-
-# Database
-*.db
-*.sqlite3
-
-# Kubernetes / Secrets
-kubeconfig.yaml
-*.pem
-*.key
-*.pub
-*.crt
-
-# OpenTelemetry and tracing data
-otel-collector.log
-trace.json
-
-# System files
-.DS_Store
-Thumbs.db
-
-# Logs
-*.log
-
-# FastAPI auto docs cache
-openapi.json
+sigma_permit.db

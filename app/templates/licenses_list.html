@@ -1,0 +1,169 @@
+<div class="table-responsive">
+    <table class="table table-hover">
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Tenant</th>
+                <th>Payload Preview</th>
+                <th>Issue Date</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for license in licenses %}
+            <tr>
+                <td>
+                    <code class="text-muted">{{ license.id }}</code>
+                </td>
+                <td>
+                    <span class="badge bg-primary">{{ license.tenant_id }}</span>
+                </td>
+                <td>
+                    <small class="text-muted font-monospace">
+                        {{ license.payload|tojson|truncate(50) }}
+                    </small>
+                </td>
+                <td>
+                    <small class="text-muted">
+                        {% if license.issued_at %}
+                            {{ license.issued_at.strftime('%Y-%m-%d %H:%M') }}
+                        {% else %}
+                            N/A
+                        {% endif %}
+                    </small>
+                </td>
+                <td>
+                    <div class="btn-group" role="group">
+                        <button class="btn btn-sm btn-outline-info" data-id="{{ license.id }}" data-payload="{{ license.payload|tojson }}" onclick="viewLicense(this)" title="View Details">
+                            <i class="bx bx-show"></i>
+                        </button>
+                        <button class="btn btn-sm btn-outline-primary me-1" data-id="{{ license.id }}" data-tenant-id="{{ license.tenant_id }}" data-payload="{{ license.payload|tojson }}" data-issued-at="{{ license.issued_at.strftime('%Y-%m-%dT%H:%M') if license.issued_at else '' }}" onclick="editLicense(this)" title="Edit License">
+                            <i class="bx bx-edit"></i>
+                        </button>
+                        <button class="btn btn-sm btn-outline-danger" data-id="{{ license.id }}" onclick="confirmDeleteLicense(this)" title="Revoke License">
+                            <i class="bx bx-trash"></i>
+                        </button>
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+{% if licenses %}
+<div class="d-flex justify-content-between align-items-center mt-3">
+    <div class="d-flex align-items-center">
+        <div class="me-3">
+            <label for="page-size-licenses" class="form-label mb-0 me-2">Show:</label>
+            <select class="form-select form-select-sm d-inline-block w-auto" id="page-size-licenses" onchange="changePageSize(this.value)">
+                <option value="10" {% if size == 10 %}selected{% endif %}>10</option>
+                <option value="20" {% if size == 20 %}selected{% endif %}>20</option>
+                <option value="50" {% if size == 50 %}selected{% endif %}>50</option>
+                <option value="100" {% if size == 100 %}selected{% endif %}>100</option>
+                <option value="150" {% if size == 150 %}selected{% endif %}>150</option>
+                <option value="200" {% if size == 200 %}selected{% endif %}>200</option>
+            </select>
+            <small class="text-muted ms-2">
+                Showing {{ (page-1)*size + 1 }} to {% if page*size > total %}{{ total }}{% else %}{{ page*size }}{% endif %} of {{ total }} licenses
+            </small>
+        </div>
+    </div>
+    <nav>
+        <ul class="pagination pagination-sm">
+            {% if page > 1 %}
+            <li class="page-item">
+                <a class="page-link" href="#" onclick="loadPage({{ page-1 }})">
+                    <i class="bx bx-chevron-left"></i>
+                </a>
+            </li>
+            {% endif %}
+
+            {% for p in range(page-2 if page-2 > 0 else 1, page+3 if page+3 <= pages else pages+1) %}
+            <li class="page-item {% if p == page %}active{% endif %}">
+                <a class="page-link" href="#" onclick="loadPage({{ p }})">{{ p }}</a>
+            </li>
+            {% endfor %}
+
+            {% if page < pages %}
+            <li class="page-item">
+                <a class="page-link" href="#" onclick="loadPage({{ page+1 }})">
+                    <i class="bx bx-chevron-right"></i>
+                </a>
+            </li>
+            {% endif %}
+        </ul>
+    </nav>
+</div>
+{% else %}
+<div class="text-center py-5">
+    <div class="mb-3">
+        <i class="bx bx-key text-muted" style="font-size: 3rem;"></i>
+    </div>
+    <h5 class="text-muted">No licenses found</h5>
+    <p class="text-muted">Get started by issuing your first license</p>
+    <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addLicenseModal">
+        <i class="bx bx-plus me-2"></i>Issue First License
+    </button>
+</div>
+{% endif %}
+
+<script>
+function viewLicense(button) {
+    const id = button.dataset.id;
+    const payload = button.dataset.payload;
+    document.getElementById('license-details').innerHTML = `
+        <div class="row">
+            <div class="col-md-12">
+                <h6 class="mb-3">License ID: <code>${id}</code></h6>
+                <div class="bg-light p-3 rounded">
+                    <h6>License Payload:</h6>
+                    <pre class="mb-0"><code>${JSON.stringify(JSON.parse(payload), null, 2)}</code></pre>
+                </div>
+            </div>
+        </div>
+    `;
+    new bootstrap.Modal(document.getElementById('viewLicenseModal')).show();
+}
+
+function confirmDeleteLicense(button) {
+    const id = button.dataset.id;
+    licenseToDelete = { id };
+    document.getElementById('delete-license-id').textContent = `ID ${id}`;
+    new bootstrap.Modal(document.getElementById('deleteLicenseModal')).show();
+}
+
+function loadPage(pageNum) {
+    const tenantFilter = document.getElementById('tenant-filter').value;
+    const pageSize = document.getElementById('page-size-licenses').value;
+    const url = tenantFilter ?
+        `/api/licenses?page=${pageNum}&size=${pageSize}&tenant_id=${tenantFilter}` :
+        `/api/licenses?page=${pageNum}&size=${pageSize}`;
+    htmx.ajax('GET', url, {target: '#licenses-list', swap: 'innerHTML'});
+}
+
+function editLicense(button) {
+    const id = button.dataset.id;
+    const tenantId = button.dataset.tenantId;
+    const payload = button.dataset.payload;
+    const issuedAt = button.dataset.issuedAt;
+
+    document.getElementById('edit_license_id').value = id;
+    document.getElementById('edit_tenant_id').value = tenantId;
+    document.getElementById('edit_payload').value = JSON.stringify(JSON.parse(payload), null, 2);
+    document.getElementById('edit_issue_date').value = issuedAt;
+
+    const form = document.querySelector('#editLicenseModal form');
+    form.action = `/api/licenses/${id}`;
+
+    new bootstrap.Modal(document.getElementById('editLicenseModal')).show();
+}
+
+function changePageSize(newSize) {
+    const tenantFilter = document.getElementById('tenant-filter').value;
+    const url = tenantFilter ?
+        `/api/licenses?page=1&size=${newSize}&tenant_id=${tenantFilter}` :
+        `/api/licenses?page=1&size=${newSize}`;
+    htmx.ajax('GET', url, {target: '#licenses-list', swap: 'innerHTML'});
+}
+</script>

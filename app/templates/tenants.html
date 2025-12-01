@@ -1,0 +1,311 @@
+{% extends "base.html" %}
+
+{% block title %}Tenants - Sigma Permit{% endblock %}
+
+{% block page_title %}Tenants{% endblock %}
+
+{% block page_subtitle %}Manage tenant organizations{% endblock %}
+
+{% block content %}
+<!-- Action Bar -->
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <p class="text-muted mb-0">Create and manage tenant organizations with license limits</p>
+    </div>
+    <div class="d-flex gap-2">
+        <button class="btn btn-outline-secondary" onclick="refreshTenants()">
+            <i class="bx bx-refresh me-1"></i>Refresh
+        </button>
+        <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addTenantModal">
+            <i class="bx bx-plus me-2"></i>Add Tenant
+        </button>
+    </div>
+</div>
+
+<!-- Tenants List -->
+<div class="card">
+    <div class="card-body">
+        <div id="tenants-list" hx-get="/api/tenants?page=1&size=10" hx-trigger="load, tenantsUpdated from:body delay:500ms">
+            <div class="text-center py-5">
+                <div class="spinner-border text-primary mb-3" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+                <p class="text-muted">Loading tenants...</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Add Tenant Modal -->
+<div class="modal fade" id="addTenantModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">
+                    <i class="bx bx-plus-circle me-2"></i>Add New Tenant
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div id="add-tenant-result"></div>
+            <form hx-post="/admin/tenants" hx-boost="false" onsubmit="return false" hx-on:htmx:after-request="if(event.detail.successful) { document.getElementById('addTenantModal').querySelector('form').reset(); $('#addTenantModal').modal('hide'); htmx.trigger('body', 'tenantsUpdated'); showToast('Tenant created successfully', 'success'); } else { showToast('Failed to create tenant', 'error'); }">
+                <div class="modal-body">
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="name" class="form-label">Tenant Name</label>
+                            <input type="text" class="form-control" id="name" name="name" placeholder="Enter tenant name" required>
+                            <div class="form-text">Display name for the tenant organization</div>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label for="slug" class="form-label">Slug</label>
+                            <input type="text" class="form-control" id="slug" name="slug" pattern="[a-z0-9-]+" placeholder="tenant-slug" required>
+                            <div class="form-text">URL-friendly identifier (lowercase, numbers, hyphens only)</div>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="max_licenses" class="form-label">Max Licenses</label>
+                            <input type="number" class="form-control" id="max_licenses" name="max_licenses" min="1" max="10000" placeholder="100" required>
+                            <div class="form-text">Maximum number of licenses this tenant can have</div>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Status</label>
+                            <div class="form-check">
+                                <input type="checkbox" class="form-check-input" id="is_active" name="is_active" checked>
+                                <label class="form-check-label" for="is_active">Active</label>
+                                <div class="form-text">Inactive tenants cannot receive new licenses</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                        <i class="bx bx-x me-1"></i>Cancel
+                    </button>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bx bx-save me-1"></i>Create Tenant
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Edit Tenant Modal -->
+<div class="modal fade" id="editTenantModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">
+                    <i class="bx bx-edit me-2"></i>Edit Tenant
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form id="editTenantForm">
+                <div class="modal-body">
+                    <input type="hidden" id="edit_tenant_id" name="id">
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="edit_name" class="form-label">Tenant Name</label>
+                            <input type="text" class="form-control" id="edit_name" name="name" required>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label for="edit_slug" class="form-label">Slug</label>
+                            <input type="text" class="form-control" id="edit_slug" name="slug" pattern="[a-z0-9-]+" required>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="edit_max_licenses" class="form-label">Max Licenses</label>
+                            <input type="number" class="form-control" id="edit_max_licenses" name="max_licenses" min="1" required>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Status</label>
+                            <div class="form-check">
+                                <input type="checkbox" class="form-check-input" id="edit_is_active" name="is_active">
+                                <label class="form-check-label" for="edit_is_active">Active</label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                        <i class="bx bx-x me-1"></i>Cancel
+                    </button>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bx bx-save me-1"></i>Update Tenant
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Delete Confirmation Modal -->
+<div class="modal fade" id="deleteTenantModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title text-danger">
+                    <i class="bx bx-error-circle me-2"></i>Confirm Deletion
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p>Are you sure you want to delete tenant <strong id="delete-tenant-name"></strong>?</p>
+                <div class="alert alert-warning">
+                    <i class="bx bx-info-circle me-1"></i>
+                    This action cannot be undone. All associated licenses will remain but become orphaned.
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                    <i class="bx bx-x me-1"></i>Cancel
+                </button>
+                <button type="button" class="btn btn-danger" id="confirm-delete-btn">
+                    <i class="bx bx-trash me-1"></i>Delete Tenant
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+let tenantToDelete = null;
+
+// Manual refresh function
+function refreshTenants() {
+    const refreshBtn = event.target.closest('button');
+    const originalHtml = refreshBtn.innerHTML;
+    refreshBtn.innerHTML = '<i class="bx bx-loader-alt bx-spin me-1"></i>Refreshing...';
+    refreshBtn.disabled = true;
+
+    // Trigger HTMX refresh
+    htmx.trigger('body', 'tenantsUpdated');
+
+    // Reset button after a short delay
+    setTimeout(() => {
+        refreshBtn.innerHTML = originalHtml;
+        refreshBtn.disabled = false;
+    }, 1000);
+}
+
+function editTenant(button) {
+    const id = button.dataset.id;
+    const name = button.dataset.name;
+    const slug = button.dataset.slug;
+    const maxLicenses = button.dataset.maxLicenses;
+    const isActive = button.dataset.isActive === 'true';
+
+    document.getElementById('edit_tenant_id').value = id;
+    document.getElementById('edit_name').value = name;
+    document.getElementById('edit_slug').value = slug;
+    document.getElementById('edit_max_licenses').value = maxLicenses;
+    document.getElementById('edit_is_active').checked = isActive;
+
+    const form = document.getElementById('editTenantForm');
+    form.action = `/admin/tenants/${id}`;
+    form.method = 'PUT';
+
+    new bootstrap.Modal(document.getElementById('editTenantModal')).show();
+}
+
+function confirmDeleteTenant(button) {
+    const id = button.dataset.id;
+    const name = button.dataset.name;
+
+    tenantToDelete = { id, name };
+    document.getElementById('delete-tenant-name').textContent = name;
+
+    new bootstrap.Modal(document.getElementById('deleteTenantModal')).show();
+}
+
+document.getElementById('editTenantForm').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    const formData = new FormData(this);
+    const id = formData.get('id');
+
+    try {
+        const response = await fetch(`/admin/tenants/${id}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                name: formData.get('name'),
+                slug: formData.get('slug'),
+                max_licenses: parseInt(formData.get('max_licenses')),
+                is_active: formData.get('is_active') === 'on'
+            })
+        });
+
+        if (response.ok) {
+            $('#editTenantModal').modal('hide');
+            htmx.trigger('body', 'tenantsUpdated');
+            showToast('Tenant updated successfully', 'success');
+        } else {
+            const error = await response.json();
+            showToast(error.detail || 'Failed to update tenant', 'error');
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        showToast('Network error occurred', 'error');
+    }
+});
+
+document.getElementById('confirm-delete-btn').addEventListener('click', async function() {
+    if (!tenantToDelete) return;
+
+    try {
+        const response = await fetch(`/admin/tenants/${tenantToDelete.id}`, {
+            method: 'DELETE'
+        });
+
+        if (response.ok) {
+            $('#deleteTenantModal').modal('hide');
+            htmx.trigger('body', 'tenantsUpdated');
+            showToast(`Tenant "${tenantToDelete.name}" deleted successfully`, 'success');
+        } else {
+            const error = await response.json();
+            showToast(error.detail || 'Failed to delete tenant', 'error');
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        showToast('Network error occurred', 'error');
+    }
+
+    tenantToDelete = null;
+});
+
+// Toast notification function
+function showToast(message, type = 'info') {
+    const toastContainer = document.getElementById('toast-container');
+    if (!toastContainer) {
+        const container = document.createElement('div');
+        container.id = 'toast-container';
+        container.className = 'toast-container position-fixed top-0 end-0 p-3';
+        container.style.zIndex = '9999';
+        document.body.appendChild(container);
+    }
+
+    const toast = document.createElement('div');
+    toast.className = `toast align-items-center text-white bg-${type === 'success' ? 'success' : type === 'error' ? 'danger' : 'info'} border-0`;
+    toast.setAttribute('role', 'alert');
+    toast.innerHTML = `
+        <div class="d-flex">
+            <div class="toast-body">${message}</div>
+            <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+        </div>
+    `;
+
+    document.getElementById('toast-container').appendChild(toast);
+    const bsToast = new bootstrap.Toast(toast);
+    bsToast.show();
+
+    toast.addEventListener('hidden.bs.toast', () => {
+        toast.remove();
+    });
+}
+</script>
+{% endblock %}

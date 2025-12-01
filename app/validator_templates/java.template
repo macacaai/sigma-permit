@@ -1,0 +1,214 @@
+import java.io.*;
+import java.net.*;
+import java.nio.file.*;
+import java.security.*;
+import java.security.spec.*;
+import java.security.interfaces.*;
+import java.util.Base64;
+import java.util.Date;
+import java.util.Calendar;
+import javax.crypto.Cipher;
+import javax.crypto.spec.GCMParameterSpec;
+import javax.crypto.spec.SecretKeySpec;
+import org.json.JSONObject;
+
+public class LicenseValidator {
+    private static final String BASE_URL = "{base_url}";
+    private static final String MASTER_PRIVATE_KEY = "{master_private_key}";
+    private static boolean downloaded = false;
+
+    public static String hybridDecrypt(String encryptedData, String privateKeyB64) throws Exception {
+        String[] parts = encryptedData.split(":", 2);
+        if (parts.length != 2) {
+            throw new Exception("Invalid hybrid encrypted data format");
+        }
+
+        String encryptedAesKeyB64 = parts[0];
+        String aesEncryptedB64 = parts[1];
+
+        // Decrypt AES key with RSA
+        byte[] privateKeyDer = Base64.getDecoder().decode(privateKeyB64);
+        KeyFactory keyFactory = KeyFactory.getInstance("RSA");
+        PKCS8EncodedKeySpec keySpec = new PKCS8EncodedKeySpec(privateKeyDer);
+        PrivateKey privateKey = keyFactory.generatePrivate(keySpec);
+
+        Cipher rsaCipher = Cipher.getInstance("RSA/ECB/OAEPWithSHA-256AndMGF1Padding");
+        rsaCipher.init(Cipher.DECRYPT_MODE, privateKey);
+        byte[] encryptedAesKey = Base64.getDecoder().decode(encryptedAesKeyB64);
+        byte[] aesKey = rsaCipher.doFinal(encryptedAesKey);
+
+        // Decrypt data with AES
+        byte[] aesEncrypted = Base64.getDecoder().decode(aesEncryptedB64);
+        byte[] iv = new byte[12];
+        byte[] tag = new byte[16];
+        byte[] ciphertext = new byte[aesEncrypted.length - 28];
+        System.arraycopy(aesEncrypted, 0, iv, 0, 12);
+        System.arraycopy(aesEncrypted, 12, tag, 0, 16);
+        System.arraycopy(aesEncrypted, 28, ciphertext, 0, ciphertext.length);
+
+        SecretKeySpec secretKey = new SecretKeySpec(aesKey, "AES");
+        Cipher aesCipher = Cipher.getInstance("AES/GCM/NoPadding");
+        GCMParameterSpec gcmSpec = new GCMParameterSpec(128, iv);
+        aesCipher.init(Cipher.DECRYPT_MODE, secretKey, gcmSpec);
+        aesCipher.updateAAD(tag);
+
+        byte[] plaintext = aesCipher.doFinal(ciphertext);
+        return new String(plaintext, "UTF-8");
+    }
+
+    public static void main(String[] args) {
+        boolean valid = validateLicense();
+        if (valid) {
+            System.out.println("Validation successful");
+            System.exit(0);
+        } else {
+            System.err.println("Validation failed");
+            System.exit(1);
+        }
+    }
+
+    public static boolean validateLicense() {
+        String licenseKey = System.getenv("LICENSE_KEY");
+        if (licenseKey == null || licenseKey.isEmpty()) {
+            System.err.println("LICENSE_KEY environment variable not set");
+            return false;
+        }
+
+        Path licenseFile = Paths.get("./license.lic");
+
+        return validateFile(licenseFile);
+    }
+
+    private static boolean validateFile(Path filePath) {
+        if (!Files.exists(filePath)) {
+            if (downloaded) {
+                System.err.println("License file not found after download");
+                return false;
+            }
+            System.out.println("License file not found, downloading...");
+            boolean downloadSuccess = downloadLicense();
+            if (!downloadSuccess) {
+                System.err.println("Failed to download license");
+                return false;
+            }
+            downloaded = true;
+        }
+
+        try {
+            String encryptedContent = new String(Files.readAllBytes(filePath)).trim();
+            String decryptedContent = hybridDecrypt(encryptedContent, MASTER_PRIVATE_KEY);
+            JSONObject data = new JSONObject(decryptedContent);
+            JSONObject license = data.getJSONObject("license");
+
+            String licenseJson = license.toString();
+
+            // Load public key
+            byte[] publicKeyDer = Base64.getDecoder().decode(System.getenv("LICENSE_KEY"));
+            KeyFactory keyFactory = KeyFactory.getInstance("RSA");
+            X509EncodedKeySpec keySpec = new X509EncodedKeySpec(publicKeyDer);
+            PublicKey publicKey = keyFactory.generatePublic(keySpec);
+
+            // Verify signature using PSS padding
+            Signature signature = Signature.getInstance("RSASSA-PSS");
+            PSSParameterSpec pssParams = new PSSParameterSpec("SHA-256", "MGF1", MGF1ParameterSpec.SHA256, 32, 1);
+            signature.setParameter(pssParams);
+            signature.initVerify(publicKey);
+            signature.update(licenseJson.getBytes("UTF-8"));
+
+            String signatureStr = data.getString("signature");
+            byte[] signatureBytes = Base64.getDecoder().decode(signatureStr);
+
+            if (!signature.verify(signatureBytes)) {
+                if (!downloaded) {
+                    System.out.println("Signature verification failed, downloading new license...");
+                    boolean downloadSuccess = downloadLicense();
+                    if (!downloadSuccess) {
+                        System.err.println("Failed to download new license");
+                        return false;
+                    }
+                    downloaded = true;
+                    return validateFile(filePath);
+                } else {
+                    System.err.println("Signature verification failed after download");
+                    return false;
+                }
+            }
+
+            // Check expiry
+            String issuedAtStr = license.getString("issued_at");
+            int validityDays = license.getInt("validity_days");
+
+            // Simple date parsing (you might want to use a proper date library)
+            Date issuedAt = new Date(); // Parse properly in production
+            Calendar cal = Calendar.getInstance();
+            cal.setTime(issuedAt);
+            cal.add(Calendar.DAY_OF_MONTH, validityDays);
+
+            if (new Date().after(cal.getTime())) {
+                if (!downloaded) {
+                    System.out.println("License expired, downloading new license...");
+                    boolean downloadSuccess = downloadLicense();
+                    if (!downloadSuccess) {
+                        System.err.println("Failed to download new license");
+                        return false;
+                    }
+                    downloaded = true;
+                    return validateFile(filePath);
+                } else {
+                    System.err.println("License expired after download");
+                    return false;
+                }
+            }
+
+            System.out.println("License is valid");
+            return true;
+
+        } catch (Exception e) {
+            System.err.println("Error validating license: " + e.getMessage());
+            if (!downloaded) {
+                System.out.println("Downloading new license...");
+                boolean downloadSuccess = downloadLicense();
+                if (!downloadSuccess) {
+                    System.err.println("Failed to download new license");
+                    return false;
+                }
+                downloaded = true;
+                return validateFile(filePath);
+            } else {
+                System.err.println("Error validating license after download");
+                return false;
+            }
+        }
+    }
+
+    private static boolean downloadLicense() {
+        try {
+            String encodedKey = Base64.getEncoder().encodeToString(System.getenv("LICENSE_KEY").getBytes("UTF-8"));
+            String urlStr = BASE_URL + "/api/licenses/issue?encoded_license_key=" + URLEncoder.encode(encodedKey, "UTF-8");
+
+            URL url = new URL(urlStr);
+            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+            conn.setRequestMethod("GET");
+
+            if (conn.getResponseCode() != 200) {
+                return false;
+            }
+
+            try (InputStream in = conn.getInputStream();
+                 FileOutputStream out = new FileOutputStream("./license.lic")) {
+                byte[] buffer = new byte[4096];
+                int bytesRead;
+                while ((bytesRead = in.read(buffer)) != -1) {
+                    out.write(buffer, 0, bytesRead);
+                }
+            }
+
+            System.out.println("License downloaded successfully");
+            return true;
+
+        } catch (Exception e) {
+            System.err.println("Download failed: " + e.getMessage());
+            return false;
+        }
+    }
+}

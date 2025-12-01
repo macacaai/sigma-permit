@@ -1,0 +1,191 @@
+import os
+import json
+import base64
+import requests
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.hazmat.primitives import serialization
+from datetime import datetime, timezone
+import sys
+
+MASTER_PRIVATE_KEY = "{master_private_key}"
+
+def hybrid_decrypt(encrypted_data, private_key_b64):
+    from cryptography.hazmat.primitives import ciphers, algorithms, modes
+    parts = encrypted_data.split(':', 1)
+    if len(parts) != 2:
+        raise ValueError('Invalid hybrid encrypted data format')
+
+    encrypted_aes_key_b64, aes_encrypted_b64 = parts
+
+    # Decrypt AES key with RSA
+    private_der = base64.b64decode(private_key_b64)
+    private_key = serialization.load_der_private_key(private_der, password=None)
+    encrypted_aes_key = base64.b64decode(encrypted_aes_key_b64)
+    aes_key = private_key.decrypt(
+        encrypted_aes_key,
+        padding.OAEP(
+            mgf=padding.MGF1(algorithm=hashes.SHA256()),
+            algorithm=hashes.SHA256(),
+            label=None
+        )
+    )
+
+    # Decrypt data with AES
+    aes_encrypted = base64.b64decode(aes_encrypted_b64)
+    iv = aes_encrypted[:12]
+    tag = aes_encrypted[12:28]
+    ciphertext = aes_encrypted[28:]
+
+    cipher = ciphers.Cipher(algorithms.AES(aes_key), modes.GCM(iv, tag))
+    decryptor = cipher.decryptor()
+    plaintext = decryptor.update(ciphertext) + decryptor.finalize()
+
+    return plaintext.decode('utf-8')
+
+def validate_license():
+    license_key = os.getenv('LICENSE_KEY')
+    if not license_key:
+        print("LICENSE_KEY environment variable not set", file=sys.stderr)
+        return False
+
+    license_file = './license.lic'
+    last_online_check_file = './last_online_check.txt'
+    downloaded = False
+
+    def validate_online():
+        try:
+            # Check if online validation is needed (daily)
+            now = datetime.now(timezone.utc)
+            needs_online_check = True
+            if os.path.exists(last_online_check_file):
+                with open(last_online_check_file, 'r') as f:
+                    last_check_str = f.read().strip()
+                    last_check = datetime.fromisoformat(last_check_str)
+                    if (now - last_check).total_seconds() < 24 * 3600:  # 24 hours
+                        needs_online_check = False
+
+            if needs_online_check:
+                print("Performing online validation...")
+                encoded_key = base64.b64encode(license_key.encode('utf-8')).decode('utf-8')
+                url = f"{base_url}/api/licenses/validate/{encoded_key}"
+                response = requests.get(url, timeout=10)
+                response.raise_for_status()
+                result = response.json()
+                if not result.get('valid', False):
+                    print("Online validation failed", file=sys.stderr)
+                    return False
+                # Update last check time
+                with open(last_online_check_file, 'w') as f:
+                    f.write(now.isoformat())
+                print("Online validation successful")
+        except Exception as e:
+            print(f"Online validation error: {e}", file=sys.stderr)
+            # If online check fails, we could allow if file is valid, but for security, fail
+            return False
+        return True
+
+    def validate_file():
+        nonlocal downloaded
+        if not os.path.exists(license_file):
+            if downloaded:
+                print("License file not found after download", file=sys.stderr)
+                return False
+            print("License file not found, downloading...")
+            download_success = download_license()
+            if not download_success:
+                print("Failed to download license", file=sys.stderr)
+                return False
+            downloaded = True
+
+        try:
+            with open(license_file, 'r') as f:
+                encrypted_content = f.read().strip()
+            decrypted_content = hybrid_decrypt(encrypted_content, MASTER_PRIVATE_KEY)
+            data = json.loads(decrypted_content)
+
+            license_json = json.dumps(data['license'], separators=(',', ':'))
+
+            # Load public key
+            public_key_der = base64.b64decode(license_key)
+            public_key = serialization.load_der_public_key(public_key_der)
+
+            # Verify signature
+            signature = base64.b64decode(data['signature'])
+            public_key.verify(
+                signature,
+                license_json.encode('utf-8'),
+                padding.PSS(
+                    mgf=padding.MGF1(hashes.SHA256()),
+                    salt_length=padding.PSS.MAX_LENGTH
+                ),
+                hashes.SHA256()
+            )
+
+            # Perform online validation if needed
+            if not validate_online():
+                return False
+
+            # Check expiry
+            issued_at = datetime.fromisoformat(data['license']['issued_at'].replace('Z', '+00:00'))
+            validity_days = data['license']['validity_days']
+            expiry_date = issued_at + datetime.timedelta(days=validity_days)
+
+            if datetime.now(timezone.utc) > expiry_date:
+                if not downloaded:
+                    print("License expired, downloading new license...")
+                    download_success = download_license()
+                    if not download_success:
+                        print("Failed to download new license", file=sys.stderr)
+                        return False
+                    downloaded = True
+                    return validate_file()
+                else:
+                    print("License expired after download", file=sys.stderr)
+                    return False
+
+            print("License is valid")
+            return True
+
+        except Exception as e:
+            print(f"Error validating license: {e}", file=sys.stderr)
+            if not downloaded:
+                print("Downloading new license...")
+                download_success = download_license()
+                if not download_success:
+                    print("Failed to download new license", file=sys.stderr)
+                    return False
+                downloaded = True
+                return validate_file()
+            else:
+                print("Error validating license after download", file=sys.stderr)
+                return False
+
+    def download_license():
+        try:
+            encoded_key = base64.b64encode(license_key.encode('utf-8')).decode('utf-8')
+            url = "{base_url}/api/licenses/issue"
+            params = {"encoded_license_key": encoded_key}
+
+            response = requests.get(url, params=params)
+            response.raise_for_status()
+
+            with open(license_file, 'wb') as f:
+                f.write(response.content)
+
+            print("License downloaded successfully")
+            return True
+
+        except Exception as e:
+            print(f"Download failed: {e}", file=sys.stderr)
+            return False
+
+    return validate_file()
+
+if __name__ == "__main__":
+    if validate_license():
+        print("Validation successful")
+        sys.exit(0)
+    else:
+        print("Validation failed", file=sys.stderr)
+        sys.exit(1)

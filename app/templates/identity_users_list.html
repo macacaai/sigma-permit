@@ -1,0 +1,181 @@
+<div class="table-responsive">
+    <table class="table table-hover">
+        <thead>
+            <tr>
+                <th>Username</th>
+                <th>Email</th>
+                <th>Full Name</th>
+                <th>Status</th>
+                <th>Verified</th>
+                <th>Roles</th>
+                <th>Last Login</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for user in users %}
+            <tr>
+                <td>{{ user.username }}</td>
+                <td>{{ user.email }}</td>
+                <td>{{ user.full_name or '-' }}</td>
+                <td>
+                    {% if user.is_active %}
+                        <span class="badge bg-success">Active</span>
+                    {% else %}
+                        <span class="badge bg-danger">Inactive</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if user.email_verified %}
+                        <span class="badge bg-success">Verified</span>
+                    {% else %}
+                        <span class="badge bg-warning">Pending</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if user.roles %}
+                        {% for role in user.roles %}
+                            <span class="badge bg-primary">{{ role.role.name }}</span>
+                        {% endfor %}
+                    {% else %}
+                        <span class="text-muted">-</span>
+                    {% endif %}
+                </td>
+                <td>{{ user.last_login.strftime('%Y-%m-%d %H:%M') if user.last_login else '-' }}</td>
+                <td>
+                    <div class="btn-group" role="group">
+                        <button class="btn btn-sm btn-outline-primary" onclick="viewUser('{{ user.id }}')" title="View">
+                            <i class="bx bx-show"></i>
+                        </button>
+                        <button class="btn btn-sm btn-outline-secondary" onclick="editUser('{{ user.id }}')" title="Edit">
+                            <i class="bx bx-edit"></i>
+                        </button>
+                        {% if is_superuser %}
+                        <button class="btn btn-sm btn-outline-warning" onclick="toggleUserStatus('{{ user.id }}', {{ user.is_active|lower }})" title="Toggle Status">
+                            <i class="bx bx-{% if user.is_active %}x{% else %}check{% endif %}"></i>
+                        </button>
+                        {% if not user.email_verified %}
+                        <button class="btn btn-sm btn-outline-info" onclick="verifyUserEmail('{{ user.id }}')" title="Verify Email">
+                            <i class="bx bx-check-circle"></i>
+                        </button>
+                        {% endif %}
+                        {% endif %}
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<!-- Pagination -->
+{% if pages > 1 %}
+<nav aria-label="Users pagination">
+    <ul class="pagination justify-content-center">
+        {% if page > 1 %}
+        <li class="page-item">
+            <a class="page-link" href="#" onclick="changePage({{ page - 1 }})">Previous</a>
+        </li>
+        {% endif %}
+
+        {% for page_num in range(max(1, page - 2), min(pages + 1, page + 3)) %}
+        <li class="page-item {% if page_num == page %}active{% endif %}">
+            <a class="page-link" href="#" onclick="changePage({{ page_num }})">{{ page_num }}</a>
+        </li>
+        {% endfor %}
+
+        {% if page < pages %}
+        <li class="page-item">
+            <a class="page-link" href="#" onclick="changePage({{ page + 1 }})">Next</a>
+        </li>
+        {% endif %}
+    </ul>
+</nav>
+{% endif %}
+
+<!-- Results info -->
+<div class="mt-3 text-muted">
+    Showing {{ ((page - 1) * size) + 1 }} to {{ min(page * size, total) }} of {{ total }} users
+</div>
+
+<script>
+function changePage(pageNum) {
+    const search = document.getElementById('searchInput').value;
+    const role = document.getElementById('roleFilter').value;
+    const status = document.getElementById('statusFilter').value;
+
+    let url = `/admin/identity/users/list?page=${pageNum}&size=10`;
+    if (search) url += `&search=${encodeURIComponent(search)}`;
+    if (role) url += `&filter_role=${role}`;
+    if (status) url += `&filter_status=${status}`;
+
+    htmx.ajax('GET', url, {target: '#usersList'});
+}
+
+function viewUser(userId) {
+    // Open user details modal or redirect to user detail page
+    window.location.href = `/admin/identity/users/${userId}`;
+}
+
+function editUser(userId) {
+    // Open edit user modal
+    alert('Edit user functionality coming soon!');
+}
+
+function toggleUserStatus(userId, isActive) {
+    const action = isActive ? 'deactivate' : 'activate';
+    const endpoint = `/api/v1/users/${userId}/${action}`;
+
+    if (confirm(`Are you sure you want to ${action} this user?`)) {
+        fetch(endpoint, {
+            method: 'PATCH',
+            headers: {
+                'Authorization': `Bearer ${getAuthToken()}`
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.id) {
+                alert(`User ${action}d successfully!`);
+                location.reload();
+            } else {
+                alert('Error: ' + (data.detail || 'Unknown error'));
+            }
+        })
+        .catch(error => {
+            alert('Error: ' + error.message);
+        });
+    }
+}
+
+function verifyUserEmail(userId) {
+    const endpoint = `/api/v1/users/${userId}/verify-email`;
+
+    if (confirm('Are you sure you want to manually verify this user\'s email?')) {
+        fetch(endpoint, {
+            method: 'PATCH',
+            headers: {
+                'Authorization': `Bearer ${getAuthToken()}`
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.id) {
+                alert('Email verified successfully!');
+                location.reload();
+            } else {
+                alert('Error: ' + (data.detail || 'Unknown error'));
+            }
+        })
+        .catch(error => {
+            alert('Error: ' + error.message);
+        });
+    }
+}
+
+function getAuthToken() {
+    // Get auth token from localStorage or wherever it's stored
+    // This is a placeholder - implement based on your auth system
+    return localStorage.getItem('auth_token') || '';
+}
+</script>

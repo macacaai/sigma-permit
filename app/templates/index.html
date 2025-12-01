@@ -1,0 +1,291 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - Sigma Permit{% endblock %}
+
+{% block page_title %}Dashboard{% endblock %}
+
+{% block page_subtitle %}Welcome to Sigma Permit{% endblock %}
+
+{% block content %}
+<!-- Stats Cards -->
+<div class="row mb-4">
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card">
+            <div class="card-body">
+                <div class="d-flex align-items-center">
+                    <div class="flex-grow-1">
+                        <h6 class="text-muted mb-1">Total Tenants</h6>
+                        <h4 class="mb-0" id="tenants-count">-</h4>
+                    </div>
+                    <div class="avatar-sm">
+                        <div class="avatar-title bg-primary rounded-circle">
+                            <i class="bx bx-building fs-4"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card">
+            <div class="card-body">
+                <div class="d-flex align-items-center">
+                    <div class="flex-grow-1">
+                        <h6 class="text-muted mb-1">Total Templates</h6>
+                        <h4 class="mb-0" id="templates-count">-</h4>
+                    </div>
+                    <div class="avatar-sm">
+                        <div class="avatar-title bg-success rounded-circle">
+                            <i class="bx bx-file fs-4"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card">
+            <div class="card-body">
+                <div class="d-flex align-items-center">
+                    <div class="flex-grow-1">
+                        <h6 class="text-muted mb-1">Total Licenses</h6>
+                        <h4 class="mb-0" id="licenses-count">-</h4>
+                    </div>
+                    <div class="avatar-sm">
+                        <div class="avatar-title bg-warning rounded-circle">
+                            <i class="bx bx-key fs-4"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card">
+            <div class="card-body">
+                <div class="d-flex align-items-center">
+                    <div class="flex-grow-1">
+                        <h6 class="text-muted mb-1">System Health</h6>
+                        <h4 class="mb-0 text-success" id="health-status">Checking...</h4>
+                    </div>
+                    <div class="avatar-sm">
+                        <div class="avatar-title bg-info rounded-circle">
+                            <i class="bx bx-heart fs-4"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Quick Actions -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bx bx-zap me-2"></i>Quick Actions</h5>
+            </div>
+            <div class="card-body">
+                <div class="row g-3">
+                    <div class="col-md-3">
+                        <a href="/tenants" class="btn btn-outline-primary w-100 h-100 d-flex flex-column align-items-center p-4">
+                            <i class="bx bx-building fs-1 mb-2"></i>
+                            <span>Manage Tenants</span>
+                        </a>
+                    </div>
+                    <div class="col-md-3">
+                        <a href="/templates" class="btn btn-outline-success w-100 h-100 d-flex flex-column align-items-center p-4">
+                            <i class="bx bx-file fs-1 mb-2"></i>
+                            <span>Manage Templates</span>
+                        </a>
+                    </div>
+                    <div class="col-md-3">
+                        <a href="/licenses" class="btn btn-outline-warning w-100 h-100 d-flex flex-column align-items-center p-4">
+                            <i class="bx bx-key fs-1 mb-2"></i>
+                            <span>Manage Licenses</span>
+                        </a>
+                    </div>
+                    <div class="col-md-3">
+                        <a href="/docs" target="_blank" class="btn btn-outline-info w-100 h-100 d-flex flex-column align-items-center p-4">
+                            <i class="bx bx-book fs-1 mb-2"></i>
+                            <span>API Documentation</span>
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Recent Activity -->
+<div class="row">
+    <div class="col-lg-8 mb-4">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="bx bx-time me-2"></i>Recent Activity</h5>
+                <small class="text-muted">Last 24 hours</small>
+            </div>
+            <div class="card-body">
+                <div class="timeline">
+                    <div class="timeline-item">
+                        <div class="timeline-marker bg-primary"></div>
+                        <div class="timeline-content">
+                            <h6 class="mb-1">System Started</h6>
+                            <p class="text-muted mb-0 small">Sigma Permit application initialized successfully</p>
+                            <small class="text-muted">Just now</small>
+                        </div>
+                    </div>
+                    <div class="timeline-item">
+                        <div class="timeline-marker bg-success"></div>
+                        <div class="timeline-content">
+                            <h6 class="mb-1">Database Connected</h6>
+                            <p class="text-muted mb-0 small">Successfully connected to SQLite database</p>
+                            <small class="text-muted">Just now</small>
+                        </div>
+                    </div>
+                    <div class="timeline-item">
+                        <div class="timeline-marker bg-info"></div>
+                        <div class="timeline-content">
+                            <h6 class="mb-1">API Ready</h6>
+                            <p class="text-muted mb-0 small">REST API endpoints are now available</p>
+                            <small class="text-muted">Just now</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-4">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bx bx-info-circle me-2"></i>System Info</h5>
+            </div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <div class="d-flex justify-content-between">
+                        <span class="text-muted">Version</span>
+                        <span>v1.0.0</span>
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <div class="d-flex justify-content-between">
+                        <span class="text-muted">Database</span>
+                        <span>SQLite</span>
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <div class="d-flex justify-content-between">
+                        <span class="text-muted">Framework</span>
+                        <span>FastAPI</span>
+                    </div>
+                </div>
+                <div class="mb-0">
+                    <div class="d-flex justify-content-between">
+                        <span class="text-muted">UI</span>
+                        <span>Bootstrap 5</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    // Load dashboard stats
+    async function loadDashboardStats() {
+        try {
+            // Load counts from API
+            const [tenantsRes, templatesRes, licensesRes, healthRes] = await Promise.all([
+                fetch('/api/tenants?page=1&size=1'),
+                fetch('/api/templates?page=1&size=1'),
+                fetch('/api/licenses?page=1&size=1'),
+                fetch('/health')
+            ]);
+
+            const tenantsData = await tenantsRes.json();
+            const templatesData = await templatesRes.json();
+            const licensesData = await licensesRes.json();
+            const healthData = await healthRes.json();
+
+            document.getElementById('tenants-count').textContent = tenantsData.total || 0;
+            document.getElementById('templates-count').textContent = templatesData.total || 0;
+            document.getElementById('licenses-count').textContent = licensesData.total || 0;
+
+            const healthElement = document.getElementById('health-status');
+            if (healthData.status === 'healthy') {
+                healthElement.textContent = 'Healthy';
+                healthElement.className = 'mb-0 text-success';
+            } else {
+                healthElement.textContent = 'Issues';
+                healthElement.className = 'mb-0 text-danger';
+            }
+        } catch (error) {
+            console.error('Error loading dashboard stats:', error);
+            // Set defaults
+            document.getElementById('tenants-count').textContent = '0';
+            document.getElementById('templates-count').textContent = '0';
+            document.getElementById('licenses-count').textContent = '0';
+            document.getElementById('health-status').textContent = 'Error';
+            document.getElementById('health-status').className = 'mb-0 text-danger';
+        }
+    }
+
+    // Load stats on page load
+    document.addEventListener('DOMContentLoaded', loadDashboardStats);
+</script>
+
+<style>
+    .timeline {
+        position: relative;
+        padding-left: 30px;
+    }
+    .timeline::before {
+        content: '';
+        position: absolute;
+        left: 15px;
+        top: 0;
+        bottom: 0;
+        width: 2px;
+        background: #e9ecef;
+    }
+    .timeline-item {
+        position: relative;
+        margin-bottom: 20px;
+    }
+    .timeline-marker {
+        position: absolute;
+        left: -22px;
+        top: 5px;
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        border: 3px solid white;
+        box-shadow: 0 0 0 2px #e9ecef;
+    }
+    .timeline-content {
+        background: #f8f9fa;
+        padding: 15px;
+        border-radius: 8px;
+        border-left: 4px solid #667eea;
+    }
+    .avatar-sm {
+        width: 50px;
+        height: 50px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    .avatar-title {
+        width: 100%;
+        height: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: white;
+    }
+</style>
+{% endblock %}

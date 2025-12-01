@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Identity Management - Sessions</title>
+</head>
+<body>
+    {% extends "base.html" %}
+
+    {% block page_title %}Sessions{% endblock %}
+    {% block page_subtitle %}Manage user sessions and device access{% endblock %}
+
+    {% block content %}
+    <div class="row">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">Active Sessions</h5>
+                    <div>
+                        <button class="btn btn-outline-danger me-2" onclick="terminateAllSessions()">
+                            <i class="bx bx-log-out"></i> Terminate All
+                        </button>
+                        {% if is_superuser %}
+                        <button class="btn btn-outline-warning" onclick="cleanupExpired()">
+                            <i class="bx bx-broom"></i> Cleanup Expired
+                        </button>
+                        {% endif %}
+                    </div>
+                </div>
+                <div class="card-body">
+                    <!-- Filters -->
+                    <div class="row mb-3">
+                        <div class="col-md-3">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="activeOnlyFilter" checked onchange="applyFilters()">
+                                <label class="form-check-label" for="activeOnlyFilter">
+                                    Active sessions only
+                                </label>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <button class="btn btn-outline-secondary" onclick="applyFilters()">
+                                <i class="bx bx-refresh"></i> Refresh
+                            </button>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="row">
+                                <div class="col-6">
+                                    <button class="btn btn-outline-info" onclick="showDeviceManagement()">
+                                        <i class="bx bx-devices"></i> Device Management
+                                    </button>
+                                </div>
+                                <div class="col-6">
+                                    <button class="btn btn-outline-primary" onclick="showSessionStats()">
+                                        <i class="bx bx-bar-chart"></i> Statistics
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Sessions List -->
+                    <div id="sessionsList" hx-get="/admin/identity/sessions/list?page=1&size=10&active_only=true" hx-trigger="load">
+                        <div class="text-center py-4">
+                            <div class="spinner-border text-primary" role="status">
+                                <span class="visually-hidden">Loading...</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Device Management Modal -->
+    <div class="modal fade" id="deviceModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Device Management</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div id="deviceList">
+                        <div class="text-center py-4">
+                            <div class="spinner-border text-primary" role="status">
+                                <span class="visually-hidden">Loading...</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Session Statistics Modal -->
+    <div class="modal fade" id="statsModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Session Statistics</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div id="statsContent">
+                        <div class="text-center py-4">
+                            <div class="spinner-border text-primary" role="status">
+                                <span class="visually-hidden">Loading...</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {% endblock %}
+
+    {% block extra_scripts %}
+    <script>
+        function applyFilters() {
+            const activeOnly = document.getElementById('activeOnlyFilter').checked;
+            const url = `/admin/identity/sessions/list?page=1&size=10&active_only=${activeOnly}`;
+            htmx.ajax('GET', url, {target: '#sessionsList'});
+        }
+
+        function terminateAllSessions() {
+            if (confirm('Are you sure you want to terminate ALL your sessions? You will be logged out of all devices.')) {
+                fetch('/api/v1/sessions', {
+                    method: 'DELETE',
+                    headers: {
+                        'Authorization': `Bearer ${getAuthToken()}`
+                    }
+                })
+                .then(response => {
+                    if (response.ok) {
+                        alert('All sessions terminated successfully!');
+                        location.reload();
+                    } else {
+                        alert('Error terminating sessions');
+                    }
+                })
+                .catch(error => {
+                    alert('Error: ' + error.message);
+                });
+            }
+        }
+
+        function cleanupExpired() {
+            if (confirm('Are you sure you want to cleanup all expired sessions?')) {
+                fetch('/api/v1/sessions/cleanup', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${getAuthToken()}`
+                    }
+                })
+                .then(response => response.json())
+                .then(data => {
+                    alert(`Cleanup completed! ${data.message}`);
+                    applyFilters();
+                })
+                .catch(error => {
+                    alert('Error: ' + error.message);
+                });
+            }
+        }
+
+        function showDeviceManagement() {
+            const modal = new bootstrap.Modal(document.getElementById('deviceModal'));
+            modal.show();
+
+            // Load device list
+            fetch('/api/v1/sessions/devices', {
+                headers: {
+                    'Authorization': `Bearer ${getAuthToken()}`
+                }
+            })
+            .then(response => response.json())
+            .then(devices => {
+                let html = '<div class="list-group">';
+                if (devices.length === 0) {
+                    html += '<div class="list-group-item text-center text-muted">No devices found</div>';
+                } else {
+                    devices.forEach(device => {
+                        html += `
+                            <div class="list-group-item d-flex justify-content-between align-items-center">
+                                <div>
+                                    <strong>${device.device_name}</strong><br>
+                                    <small class="text-muted">
+                                        ${device.os} • ${device.browser}
+                                        ${device.is_trusted ? '<span class="badge bg-success ms-2">Trusted</span>' : '<span class="badge bg-warning ms-2">Not Trusted</span>'}
+                                    </small>
+                                </div>
+                                <div>
+                                    ${device.is_trusted ?
+                                        `<button class="btn btn-sm btn-outline-warning" onclick="untrustDevice('${device.device_id}')">Untrust</button>` :
+                                        `<button class="btn btn-sm btn-outline-success" onclick="trustDevice('${device.device_id}')">Trust</button>`
+                                    }
+                                </div>
+                            </div>
+                        `;
+                    });
+                }
+                html += '</div>';
+                document.getElementById('deviceList').innerHTML = html;
+            })
+            .catch(error => {
+                document.getElementById('deviceList').innerHTML = '<div class="alert alert-danger">Error loading devices</div>';
+            });
+        }
+
+        function trustDevice(deviceId) {
+            fetch(`/api/v1/sessions/devices/${deviceId}/trust`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${getAuthToken()}`
+                }
+            })
+            .then(response => {
+                if (response.ok) {
+                    showDeviceManagement(); // Refresh
+                } else {
+                    alert('Error trusting device');
+                }
+            });
+        }
+
+        function untrustDevice(deviceId) {
+            fetch(`/api/v1/sessions/devices/${deviceId}/trust`, {
+                method: 'DELETE',
+                headers: {
+                    'Authorization': `Bearer ${getAuthToken()}`
+                }
+            })
+            .then(response => {
+                if (response.ok) {
+                    showDeviceManagement(); // Refresh
+                } else {
+                    alert('Error untrusting device');
+                }
+            });
+        }
+
+        function showSessionStats() {
+            const modal = new bootstrap.Modal(document.getElementById('statsModal'));
+            modal.show();
+
+            // Load session statistics
+            fetch('/api/v1/sessions/stats', {
+                headers: {
+                    'Authorization': `Bearer ${getAuthToken()}`
+                }
+            })
+            .then(response => response.json())
+            .then(stats => {
+                const html = `
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="card text-center">
+                                <div class="card-body">
+                                    <h3 class="text-primary">${stats.total_sessions || 0}</h3>
+                                    <p class="text-muted mb-0">Total Sessions</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="card text-center">
+                                <div class="card-body">
+                                    <h3 class="text-success">${stats.active_sessions || 0}</h3>
+                                    <p class="text-muted mb-0">Active Sessions</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-6 mt-3">
+                            <div class="card text-center">
+                                <div class="card-body">
+                                    <h3 class="text-warning">${stats.expired_sessions || 0}</h3>
+                                    <p class="text-muted mb-0">Expired Sessions</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-6 mt-3">
+                            <div class="card text-center">
+                                <div class="card-body">
+                                    <h3 class="text-danger">${stats.inactive_sessions || 0}</h3>
+                                    <p class="text-muted mb-0">Inactive Sessions</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                document.getElementById('statsContent').innerHTML = html;
+            })
+            .catch(error => {
+                document.getElementById('statsContent').innerHTML = '<div class="alert alert-danger">Error loading statistics</div>';
+            });
+        }
+
+        function getAuthToken() {
+            // Get auth token from localStorage or wherever it's stored
+            // This is a placeholder - implement based on your auth system
+            return localStorage.getItem('auth_token') || '';
+        }
+    </script>
+    {% endblock %}
+</body>
+</html>

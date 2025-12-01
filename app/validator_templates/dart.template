@@ -1,0 +1,141 @@
+import 'dart:io';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
+import 'package:crypto/crypto.dart';
+import 'package:pointycastle/pointycastle.dart';
+
+void main() async {
+  bool valid = await validateLicense();
+  if (valid) {
+    print('Validation successful');
+    exit(0);
+  } else {
+    stderr.writeln('Validation failed');
+    exit(1);
+  }
+}
+
+Future<bool> validateLicense() async {
+  String? licenseKey = Platform.environment['LICENSE_KEY'];
+  if (licenseKey == null || licenseKey.isEmpty) {
+    stderr.writeln('LICENSE_KEY environment variable not set');
+    return false;
+  }
+
+  File licenseFile = File('./license.lic');
+  bool downloaded = false;
+  return validateFile(licenseFile, downloaded);
+}
+
+Future<bool> validateFile(File file, bool downloaded) async {
+  if (!await file.exists()) {
+    if (downloaded) {
+      stderr.writeln('License file not found after download');
+      return false;
+    }
+    print('License file not found, downloading...');
+    bool downloadSuccess = await downloadLicense();
+    if (!downloadSuccess) {
+      stderr.writeln('Failed to download license');
+      return false;
+    }
+    downloaded = true;
+  }
+
+  try {
+    String content = await file.readAsString();
+    Map<String, dynamic> data = json.decode(content);
+    Map<String, dynamic> license = data['license'];
+
+    String licenseJson = json.encode(license);
+
+    // Verify signature (placeholder - implement proper RSA verification)
+    String signature = data['signature'];
+    String? licenseKey = Platform.environment['LICENSE_KEY'];
+    if (!verifySignature(licenseJson, signature, licenseKey!)) {
+      if (!downloaded) {
+        print('Signature verification failed, downloading new license...');
+        bool downloadSuccess = await downloadLicense();
+        if (!downloadSuccess) {
+          stderr.writeln('Failed to download new license');
+          return false;
+        }
+        downloaded = true;
+        return validateFile(file, downloaded);
+      } else {
+        stderr.writeln('Signature verification failed after download');
+        return false;
+      }
+    }
+
+    // Check expiry (simplified)
+    String issuedAtStr = license['issued_at'];
+    int validityDays = license['validity_days'];
+
+    DateTime issuedAt = DateTime.parse(issuedAtStr);
+    DateTime expiryDate = issuedAt.add(Duration(days: validityDays));
+
+    if (DateTime.now().isAfter(expiryDate)) {
+      if (!downloaded) {
+        print('License expired, downloading new license...');
+        bool downloadSuccess = await downloadLicense();
+        if (!downloadSuccess) {
+          stderr.writeln('Failed to download new license');
+          return false;
+        }
+        downloaded = true;
+        return validateFile(file, downloaded);
+      } else {
+        stderr.writeln('License expired after download');
+        return false;
+      }
+    }
+
+    print('License is valid');
+    return true;
+
+  } catch (e) {
+    stderr.writeln('Error validating license: $e');
+    if (!downloaded) {
+      print('Downloading new license...');
+      bool downloadSuccess = await downloadLicense();
+      if (!downloadSuccess) {
+        stderr.writeln('Failed to download new license');
+        return false;
+      }
+      downloaded = true;
+      return validateFile(file, downloaded);
+    } else {
+      stderr.writeln('Error validating license after download');
+      return false;
+    }
+  }
+}
+
+bool verifySignature(String data, String signature, String publicKeyDer) {
+  // Placeholder - implement proper RSA signature verification
+  return true; // TODO: Implement actual verification
+}
+
+Future<bool> downloadLicense() async {
+  try {
+    String licenseKey = Platform.environment['LICENSE_KEY']!;
+    String encodedKey = base64.encode(utf8.encode(licenseKey));
+    String url = '{base_url}/api/licenses/issue?encoded_license_key=${Uri.encodeComponent(encodedKey)}';
+
+    http.Response response = await http.get(Uri.parse(url));
+    if (response.statusCode != 200) {
+      return false;
+    }
+
+    File licenseFile = File('./license.lic');
+    await licenseFile.writeAsBytes(response.bodyBytes);
+
+    print('License downloaded successfully');
+    return true;
+
+  } catch (e) {
+    stderr.writeln('Download failed: $e');
+    return false;
+  }
+}

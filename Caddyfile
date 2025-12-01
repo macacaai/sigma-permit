@@ -1,0 +1,32 @@
+# Sigma Permit Caddy Configuration
+
+# Main domain (adjust as needed)
+sigma-permit.localhost {
+    # API routes - proxy to backend
+    handle /api/* {
+        uri strip_prefix /api
+        reverse_proxy sigma-permit:8000
+    }
+
+    # Static assets and all other routes - serve from React frontend
+    handle {
+        reverse_proxy react-frontend:3000
+    }
+
+    # Enable automatic HTTPS (optional for local development)
+    # tls internal
+}
+
+# Alternative: Use localhost with different ports
+:80 {
+    # API routes - proxy to backend
+    handle /api/* {
+        uri strip_prefix /api
+        reverse_proxy sigma-permit:8000
+    }
+
+    # Static assets and all other routes - serve from React frontend
+    handle {
+        reverse_proxy react-frontend:3000
+    }
+}

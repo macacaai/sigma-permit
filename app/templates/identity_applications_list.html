@@ -1,0 +1,226 @@
+<div class="table-responsive">
+    <table class="table table-hover">
+        <thead>
+            <tr>
+                <th>Application</th>
+                <th>Client ID</th>
+                <th>Type</th>
+                <th>Status</th>
+                <th>Grant Types</th>
+                <th>Scopes</th>
+                <th>Created</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for app in applications %}
+            <tr>
+                <td>
+                    <div>
+                        <strong>{{ app.client_name }}</strong>
+                        {% if app.logo_uri %}
+                        <br><small><img src="{{ app.logo_uri }}" alt="logo" style="height: 20px; width: 20px; object-fit: cover;"> {{ app.website_uri or '' }}</small>
+                        {% endif %}
+                    </div>
+                </td>
+                <td>
+                    <code class="small">{{ app.client_id }}</code>
+                    <button class="btn btn-sm btn-link p-0 ms-1" onclick="copyToClipboard('{{ app.client_id }}')" title="Copy Client ID">
+                        <i class="bx bx-copy"></i>
+                    </button>
+                </td>
+                <td>
+                    <span class="badge bg-{% if app.client_type == 'confidential' %}warning{% else %}info{% endif %}">
+                        {{ app.client_type.title() }}
+                    </span>
+                </td>
+                <td>
+                    {% if app.is_active %}
+                        <span class="badge bg-success">Active</span>
+                    {% else %}
+                        <span class="badge bg-danger">Inactive</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if app.allowed_grant_types %}
+                        {% for grant_type in app.allowed_grant_types %}
+                            <span class="badge bg-light text-dark">{{ grant_type.replace('_', ' ').title() }}</span>
+                        {% endfor %}
+                    {% else %}
+                        <span class="text-muted">-</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if app.allowed_scopes %}
+                        {% for scope in app.allowed_scopes %}
+                            <span class="badge bg-secondary">{{ scope }}</span>
+                        {% endfor %}
+                    {% else %}
+                        <span class="text-muted">-</span>
+                    {% endif %}
+                </td>
+                <td>{{ app.created_at.strftime('%Y-%m-%d') }}</td>
+                <td>
+                    <div class="btn-group" role="group">
+                        <button class="btn btn-sm btn-outline-primary" onclick="viewApplication('{{ app.id }}')" title="View Details">
+                            <i class="bx bx-show"></i>
+                        </button>
+                        <button class="btn btn-sm btn-outline-secondary" onclick="editApplication('{{ app.id }}')" title="Edit">
+                            <i class="bx bx-edit"></i>
+                        </button>
+                        {% if is_superuser %}
+                        <button class="btn btn-sm btn-outline-warning" onclick="toggleAppStatus('{{ app.id }}', {{ app.is_active|lower }})" title="Toggle Status">
+                            <i class="bx bx-{% if app.is_active %}x{% else %}check{% endif %}"></i>
+                        </button>
+                        {% if app.client_type == 'confidential' %}
+                        <button class="btn btn-sm btn-outline-info" onclick="rotateSecret('{{ app.id }}')" title="Rotate Secret">
+                            <i class="bx bx-refresh"></i>
+                        </button>
+                        {% endif %}
+                        {% endif %}
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<!-- Pagination -->
+{% if pages > 1 %}
+<nav aria-label="Applications pagination">
+    <ul class="pagination justify-content-center">
+        {% if page > 1 %}
+        <li class="page-item">
+            <a class="page-link" href="#" onclick="changePage({{ page - 1 }})">Previous</a>
+        </li>
+        {% endif %}
+
+        {% for page_num in range(max(1, page - 2), min(pages + 1, page + 3)) %}
+        <li class="page-item {% if page_num == page %}active{% endif %}">
+            <a class="page-link" href="#" onclick="changePage({{ page_num }})">{{ page_num }}</a>
+        </li>
+        {% endfor %}
+
+        {% if page < pages %}
+        <li class="page-item">
+            <a class="page-link" href="#" onclick="changePage({{ page + 1 }})">Next</a>
+        </li>
+        {% endif %}
+    </ul>
+</nav>
+{% endif %}
+
+<!-- Results info -->
+<div class="mt-3 text-muted">
+    Showing {{ ((page - 1) * size) + 1 }} to {{ min(page * size, total) }} of {{ total }} applications
+</div>
+
+<script>
+function changePage(pageNum) {
+    const active = document.getElementById('activeFilter').value;
+    const tenant = document.getElementById('tenantFilter').value;
+
+    let url = `/admin/identity/applications/list?page=${pageNum}&size=10`;
+    if (active !== '') url += `&is_active=${active}`;
+    if (tenant) url += `&tenant_id=${encodeURIComponent(tenant)}`;
+
+    htmx.ajax('GET', url, {target: '#applicationsList'});
+}
+
+function viewApplication(appId) {
+    // Open application details modal or redirect to app detail page
+    window.location.href = `/admin/identity/applications/${appId}`;
+}
+
+function editApplication(appId) {
+    // Open edit application modal
+    alert('Edit application functionality coming soon!');
+}
+
+function toggleAppStatus(appId, isActive) {
+    const action = isActive ? 'deactivate' : 'activate';
+    const endpoint = `/api/v1/applications/${appId}`;
+
+    const updateData = {
+        is_active: !isActive
+    };
+
+    if (confirm(`Are you sure you want to ${action} this application?`)) {
+        fetch(endpoint, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${getAuthToken()}`
+            },
+            body: JSON.stringify(updateData)
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.id) {
+                alert(`Application ${action}d successfully!`);
+                location.reload();
+            } else {
+                alert('Error: ' + (data.detail || 'Unknown error'));
+            }
+        })
+        .catch(error => {
+            alert('Error: ' + error.message);
+        });
+    }
+}
+
+function rotateSecret(appId) {
+    const endpoint = `/api/v1/applications/${appId}/secret`;
+
+    if (confirm('Are you sure you want to rotate the client secret? This will invalidate the current secret.')) {
+        fetch(endpoint, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${getAuthToken()}`
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.client_secret) {
+                alert(`Secret rotated successfully!\n\nNew Client Secret: ${data.client_secret}\n\nMake sure to update your application with the new secret.`);
+                location.reload();
+            } else {
+                alert('Error: ' + (data.detail || 'Unknown error'));
+            }
+        })
+        .catch(error => {
+            alert('Error: ' + error.message);
+        });
+    }
+}
+
+function copyToClipboard(text) {
+    navigator.clipboard.writeText(text).then(() => {
+        // Show temporary success message
+        const notification = document.createElement('div');
+        notification.className = 'alert alert-success alert-dismissible fade show position-fixed';
+        notification.style.cssText = 'top: 20px; right: 20px; z-index: 9999; min-width: 300px;';
+        notification.innerHTML = `
+            <i class="bx bx-check"></i> Client ID copied to clipboard!
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        `;
+        document.body.appendChild(notification);
+
+        // Auto remove after 3 seconds
+        setTimeout(() => {
+            if (notification.parentNode) {
+                notification.remove();
+            }
+        }, 3000);
+    }).catch(err => {
+        console.error('Failed to copy: ', err);
+    });
+}
+
+function getAuthToken() {
+    // Get auth token from localStorage or wherever it's stored
+    // This is a placeholder - implement based on your auth system
+    return localStorage.getItem('auth_token') || '';
+}
+</script>

@@ -1,0 +1,272 @@
+package main
+
+import (
+    "crypto/aes"
+    "crypto/cipher"
+    "crypto/rand"
+    "crypto/rsa"
+    "crypto/sha256"
+    "crypto/x509"
+    "encoding/base64"
+    "encoding/json"
+    "fmt"
+    "io"
+    "net/http"
+    "net/url"
+    "os"
+    "strings"
+    "time"
+)
+
+type LicenseData struct {
+    License   License `json:"license"`
+    Signature string  `json:"signature"`
+}
+
+type License struct {
+    ID           string      `json:"id"`
+    TenantID     string      `json:"tenant_id"`
+    IssuedAt     string      `json:"issued_at"`
+    ValidityDays int         `json:"validity_days"`
+    Payload      interface{} `json:"payload"`
+}
+
+const baseURL = "{base_url}"
+
+func hybridDecrypt(encryptedData string, privateKeyB64 string) (string, error) {
+    parts := strings.Split(encryptedData, ":", 2)
+    if len(parts) != 2 {
+        return "", fmt.Errorf("invalid hybrid encrypted data format")
+    }
+
+    encryptedAesKeyB64, aesEncryptedB64 := parts[0], parts[1]
+
+    // Decrypt AES key with RSA
+    privateKeyDer, _ := base64.StdEncoding.DecodeString(privateKeyB64)
+    privateKey, err := x509.ParsePKCS8PrivateKey(privateKeyDer)
+    if err != nil {
+        return "", err
+    }
+    rsaPrivateKey, ok := privateKey.(*rsa.PrivateKey)
+    if !ok {
+        return "", fmt.Errorf("not an RSA private key")
+    }
+
+    encryptedAesKey, _ := base64.StdEncoding.DecodeString(encryptedAesKeyB64)
+    aesKey, err := rsa.DecryptOAEP(sha256.New(), rand.Reader, rsaPrivateKey, encryptedAesKey, nil)
+    if err != nil {
+        return "", err
+    }
+
+    // Decrypt data with AES
+    aesEncrypted, _ := base64.StdEncoding.DecodeString(aesEncryptedB64)
+    iv := aesEncrypted[:12]
+    tag := aesEncrypted[12:28]
+    ciphertext := aesEncrypted[28:]
+
+    block, err := aes.NewCipher(aesKey)
+    if err != nil {
+        return "", err
+    }
+
+    aesgcm, err := cipher.NewGCM(block)
+    if err != nil {
+        return "", err
+    }
+
+    plaintext, err := aesgcm.Open(nil, iv, ciphertext, nil)
+    if err != nil {
+        return "", err
+    }
+
+    return string(plaintext), nil
+}
+
+func main() {
+    if validateLicense() {
+        fmt.Println("Validation successful")
+        os.Exit(0)
+    } else {
+        fmt.Fprintln(os.Stderr, "Validation failed")
+        os.Exit(1)
+    }
+}
+
+func validateLicense() bool {
+    licenseKey := os.Getenv("LICENSE_KEY")
+    if licenseKey == "" {
+        fmt.Fprintln(os.Stderr, "LICENSE_KEY environment variable not set")
+        return false
+    }
+
+    licenseFile := "./license.lic"
+    downloaded := false
+    return validateFile(licenseFile, &downloaded)
+}
+
+func validateFile(filePath string, downloaded *bool) bool {
+    if _, err := os.Stat(filePath); os.IsNotExist(err) {
+        if *downloaded {
+            fmt.Fprintln(os.Stderr, "License file not found after download")
+            return false
+        }
+        fmt.Println("License file not found, downloading...")
+        downloadSuccess := downloadLicense()
+        if !downloadSuccess {
+            fmt.Fprintln(os.Stderr, "Failed to download license")
+            return false
+        }
+        *downloaded = true
+    }
+
+    encryptedContentBytes, err := os.ReadFile(filePath)
+    if err != nil {
+        fmt.Fprintf(os.Stderr, "Error reading license file: %v\n", err)
+        if !*downloaded {
+            fmt.Println("Downloading new license...")
+            downloadSuccess := downloadLicense()
+            if !downloadSuccess {
+                fmt.Fprintln(os.Stderr, "Failed to download new license")
+                return false
+            }
+            *downloaded = true
+            return validateFile(filePath, downloaded)
+        } else {
+            fmt.Fprintln(os.Stderr, "Error reading license file after download")
+            return false
+        }
+    }
+
+    encryptedContent := strings.TrimSpace(string(encryptedContentBytes))
+    decryptedContent, err := hybridDecrypt(encryptedContent, "{master_private_key}")
+    if err != nil {
+        fmt.Fprintf(os.Stderr, "Error decrypting license file: %v\n", err)
+        if !*downloaded {
+            fmt.Println("Downloading new license...")
+            downloadSuccess := downloadLicense()
+            if !downloadSuccess {
+                fmt.Fprintln(os.Stderr, "Failed to download new license")
+                return false
+            }
+            *downloaded = true
+            return validateFile(filePath, downloaded)
+        } else {
+            fmt.Fprintln(os.Stderr, "Error decrypting license file after download")
+            return false
+        }
+    }
+
+    var data LicenseData
+    if err := json.Unmarshal([]byte(decryptedContent), &data); err != nil {
+        fmt.Fprintf(os.Stderr, "Error parsing license: %v\n", err)
+        if !*downloaded {
+            fmt.Println("Downloading new license...")
+            downloadSuccess := downloadLicense()
+            if !downloadSuccess {
+                fmt.Fprintln(os.Stderr, "Failed to download new license")
+                return false
+            }
+            *downloaded = true
+            return validateFile(filePath, downloaded)
+        } else {
+            fmt.Fprintln(os.Stderr, "Error parsing license after download")
+            return false
+        }
+    }
+
+    licenseJson, _ := json.Marshal(data.License)
+
+    // Verify signature
+    publicKeyDer, _ := base64.StdEncoding.DecodeString(os.Getenv("LICENSE_KEY"))
+    publicKey, err := x509.ParsePKIXPublicKey(publicKeyDer)
+    if err != nil {
+        fmt.Fprintf(os.Stderr, "Error parsing public key: %v\n", err)
+        return false
+    }
+
+    rsaPublicKey, ok := publicKey.(*rsa.PublicKey)
+    if !ok {
+        fmt.Fprintln(os.Stderr, "Not an RSA public key")
+        return false
+    }
+
+    signature, _ := base64.StdEncoding.DecodeString(data.Signature)
+    hashed := sha256.Sum256(licenseJson)
+
+    if err := rsa.VerifyPSS(rsaPublicKey, crypto.SHA256, hashed[:], signature, &rsa.PSSOptions{SaltLength: rsa.PSSSaltLengthAuto}); err != nil {
+        if !*downloaded {
+            fmt.Println("Signature verification failed, downloading new license...")
+            downloadSuccess := downloadLicense()
+            if !downloadSuccess {
+                fmt.Fprintln(os.Stderr, "Failed to download new license")
+                return false
+            }
+            *downloaded = true
+            return validateFile(filePath, downloaded)
+        } else {
+            fmt.Fprintln(os.Stderr, "Signature verification failed after download")
+            return false
+        }
+    }
+
+    // Check expiry
+    issuedAt, err := time.Parse(time.RFC3339, data.License.IssuedAt)
+    if err != nil {
+        fmt.Fprintf(os.Stderr, "Error parsing issued_at: %v\n", err)
+        return false
+    }
+
+    expiryDate := issuedAt.AddDate(0, 0, data.License.ValidityDays)
+    if time.Now().After(expiryDate) {
+        if !*downloaded {
+            fmt.Println("License expired, downloading new license...")
+            downloadSuccess := downloadLicense()
+            if !downloadSuccess {
+                fmt.Fprintln(os.Stderr, "Failed to download new license")
+                return false
+            }
+            *downloaded = true
+            return validateFile(filePath, downloaded)
+        } else {
+            fmt.Fprintln(os.Stderr, "License expired after download")
+            return false
+        }
+    }
+
+    fmt.Println("License is valid")
+    return true
+}
+
+func downloadLicense() bool {
+    licenseKey := os.Getenv("LICENSE_KEY")
+    encodedKey := base64.StdEncoding.EncodeToString([]byte(licenseKey))
+
+    fullURL := fmt.Sprintf("%s/api/licenses/issue?encoded_license_key=%s", baseURL, url.QueryEscape(encodedKey))
+
+    resp, err := http.Get(fullURL)
+    if err != nil {
+        fmt.Fprintf(os.Stderr, "Download failed: %v\n", err)
+        return false
+    }
+    defer resp.Body.Close()
+
+    if resp.StatusCode != 200 {
+        return false
+    }
+
+    out, err := os.Create("./license.lic")
+    if err != nil {
+        fmt.Fprintf(os.Stderr, "Error creating license file: %v\n", err)
+        return false
+    }
+    defer out.Close()
+
+    _, err = io.Copy(out, resp.Body)
+    if err != nil {
+        fmt.Fprintf(os.Stderr, "Error writing license file: %v\n", err)
+        return false
+    }
+
+    fmt.Println("License downloaded successfully")
+    return true
+}

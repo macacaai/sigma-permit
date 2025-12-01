@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Identity Management - Applications</title>
+</head>
+<body>
+    {% extends "base.html" %}
+
+    {% block page_title %}Applications{% endblock %}
+    {% block page_subtitle %}Manage OAuth2 client applications{% endblock %}
+
+    {% block content %}
+    <div class="row">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">OAuth2 Applications</h5>
+                    <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createAppModal">
+                        <i class="bx bx-plus"></i> Create Application
+                    </button>
+                </div>
+                <div class="card-body">
+                    <!-- Filters -->
+                    <div class="row mb-3">
+                        <div class="col-md-3">
+                            <select class="form-select" id="activeFilter">
+                                <option value="">All Applications</option>
+                                <option value="true" {% if is_active == True %}selected{% endif %}>Active Only</option>
+                                <option value="false" {% if is_active == False %}selected{% endif %}>Inactive Only</option>
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <input type="text" class="form-control" id="tenantFilter" placeholder="Tenant ID" value="{{ tenant_id or '' }}">
+                        </div>
+                        <div class="col-md-3">
+                            <button class="btn btn-outline-secondary w-100" onclick="applyFilters()">
+                                <i class="bx bx-filter"></i> Filter
+                            </button>
+                        </div>
+                        <div class="col-md-3">
+                            <button class="btn btn-outline-info" onclick="showOAuthGuide()">
+                                <i class="bx bx-info-circle"></i> OAuth2 Guide
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Applications List -->
+                    <div id="applicationsList" hx-get="/admin/identity/applications/list?page=1&size=10" hx-trigger="load">
+                        <div class="text-center py-4">
+                            <div class="spinner-border text-primary" role="status">
+                                <span class="visually-hidden">Loading...</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Create Application Modal -->
+    <div class="modal fade" id="createAppModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Create OAuth2 Application</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="createAppForm">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="client_name" class="form-label">Application Name</label>
+                                    <input type="text" class="form-control" id="client_name" name="client_name" required>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="client_type" class="form-label">Client Type</label>
+                                    <select class="form-select" id="client_type" name="client_type" required>
+                                        <option value="confidential">Confidential</option>
+                                        <option value="public">Public</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="redirect_uris" class="form-label">Redirect URIs</label>
+                            <textarea class="form-control" id="redirect_uris" name="redirect_uris" rows="3"
+                                      placeholder="One URI per line&#10;https://app.example.com/callback&#10;https://app.example.com/auth/callback"></textarea>
+                            <div class="form-text">Enter one redirect URI per line</div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="allowed_grant_types" class="form-label">Grant Types</label>
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="authorization_code" name="grant_types" value="authorization_code" checked>
+                                        <label class="form-check-label" for="authorization_code">
+                                            Authorization Code
+                                        </label>
+                                    </div>
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="refresh_token" name="grant_types" value="refresh_token" checked>
+                                        <label class="form-check-label" for="refresh_token">
+                                            Refresh Token
+                                        </label>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="client_credentials" name="grant_types" value="client_credentials">
+                                        <label class="form-check-label" for="client_credentials">
+                                            Client Credentials
+                                        </label>
+                                    </div>
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="password" name="grant_types" value="password">
+                                        <label class="form-check-label" for="password">
+                                            Password
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="allowed_scopes" class="form-label">Scopes</label>
+                            <input type="text" class="form-control" id="allowed_scopes" name="allowed_scopes"
+                                   value="read write profile" placeholder="read write profile email">
+                            <div class="form-text">Space-separated list of allowed scopes</div>
+                        </div>
+
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="logo_uri" class="form-label">Logo URL</label>
+                                    <input type="url" class="form-control" id="logo_uri" name="logo_uri">
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="website_uri" class="form-label">Website URL</label>
+                                    <input type="url" class="form-control" id="website_uri" name="website_uri">
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="description" class="form-label">Description</label>
+                            <textarea class="form-control" id="description" name="description" rows="2"></textarea>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" onclick="createApplication()">Create Application</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {% endblock %}
+
+    {% block extra_scripts %}
+    <script>
+        function applyFilters() {
+            const active = document.getElementById('activeFilter').value;
+            const tenant = document.getElementById('tenantFilter').value;
+
+            let url = '/admin/identity/applications/list?page=1&size=10';
+            if (active !== '') url += `&is_active=${active}`;
+            if (tenant) url += `&tenant_id=${encodeURIComponent(tenant)}`;
+
+            htmx.ajax('GET', url, {target: '#applicationsList'});
+        }
+
+        function createApplication() {
+            const form = document.getElementById('createAppForm');
+            const formData = new FormData(form);
+
+            // Handle grant types checkboxes
+            const grantTypes = [];
+            document.querySelectorAll('input[name="grant_types"]:checked').forEach(checkbox => {
+                grantTypes.push(checkbox.value);
+            });
+            formData.set('allowed_grant_types', JSON.stringify(grantTypes));
+
+            // Handle redirect URIs
+            const redirectUris = formData.get('redirect_uris').split('\n').map(uri => uri.trim()).filter(uri => uri);
+            formData.set('redirect_uris', JSON.stringify(redirectUris));
+
+            // Handle scopes
+            const scopes = formData.get('allowed_scopes').split(' ').filter(scope => scope);
+            formData.set('allowed_scopes', JSON.stringify(scopes));
+
+            fetch('/api/v1/applications', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.id) {
+                    alert('Application created successfully!\n\nClient ID: ' + data.client_id + '\nClient Secret: ' + (data.client_secret || 'N/A (Public Client)'));
+                    document.getElementById('createAppModal').querySelector('.btn-close').click();
+                    applyFilters(); // Refresh the list
+                } else {
+                    alert('Error: ' + (data.detail || 'Unknown error'));
+                }
+            })
+            .catch(error => {
+                alert('Error creating application: ' + error.message);
+            });
+        }
+
+        function showOAuthGuide() {
+            const guide = `
+OAuth2 Application Setup Guide:
+
+1. Client Types:
+   - Confidential: Server-side applications (has client secret)
+   - Public: Client-side/SPA applications (no client secret)
+
+2. Grant Types:
+   - Authorization Code: For web apps (most secure)
+   - Client Credentials: For service-to-service auth
+   - Refresh Token: For long-lived access
+
+3. Redirect URIs: Must exactly match your app's callback URL
+
+4. Scopes: Define what data your app can access
+   - read: Read user data
+   - write: Modify user data
+   - profile: Access user profile info
+
+For more information, visit: /docs
+            `;
+            alert(guide);
+        }
+
+        // Auto-refresh filters on input
+        document.getElementById('tenantFilter').addEventListener('input', debounce(applyFilters, 500));
+
+        function debounce(func, wait) {
+            let timeout;
+            return function executedFunction(...args) {
+                const later = () => {
+                    clearTimeout(timeout);
+                    func(...args);
+                };
+                clearTimeout(timeout);
+                timeout = setTimeout(later, wait);
+            };
+        }
+    </script>
+    {% endblock %}
+</body>
+</html>

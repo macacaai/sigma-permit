@@ -1,0 +1,231 @@
+import * as fs from 'fs';
+import * as crypto from 'crypto';
+import * as https from 'https';
+
+const MASTER_PRIVATE_KEY = "{master_private_key}";
+const BASE_URL = "{base_url}";
+const LICENSE_KEY = process.env.LICENSE_KEY;
+const LICENSE_FILE = './license.lic';
+const LAST_ONLINE_CHECK_FILE = './last_online_check.txt';
+
+function hybridDecrypt(encryptedData: string, privateKeyB64: string): string {
+    const parts = encryptedData.split(':', 2);
+    if (parts.length !== 2) {
+        throw new Error('Invalid hybrid encrypted data format');
+    }
+
+    const [encryptedAesKeyB64, aesEncryptedB64] = parts;
+
+    // Decrypt AES key with RSA
+    const privateKey = crypto.createPrivateKey({
+        key: Buffer.from(privateKeyB64, 'base64'),
+        format: 'der',
+        type: 'pkcs8'
+    });
+    const encryptedAesKey = Buffer.from(encryptedAesKeyB64, 'base64');
+    const aesKey = crypto.privateDecrypt({
+        key: privateKey,
+        padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
+        oaepHash: 'sha256'
+    }, encryptedAesKey);
+
+    // Decrypt data with AES-GCM
+    const aesEncrypted = Buffer.from(aesEncryptedB64, 'base64');
+    const iv = aesEncrypted.slice(0, 12);
+    const tag = aesEncrypted.slice(12, 28);
+    const ciphertext = aesEncrypted.slice(28);
+
+    const decipher = crypto.createDecipherGCM('aes-256-gcm', aesKey);
+    decipher.setAuthTag(tag);
+    decipher.setIV(iv);
+    let decrypted = decipher.update(ciphertext);
+    decrypted = Buffer.concat([decrypted, decipher.final()]);
+
+    return decrypted.toString('utf8');
+}
+
+async function validateOnline(): Promise<boolean> {
+    try {
+        const now = new Date();
+        let needsOnlineCheck = true;
+
+        if (fs.existsSync(LAST_ONLINE_CHECK_FILE)) {
+            const lastCheckStr = fs.readFileSync(LAST_ONLINE_CHECK_FILE, 'utf8').trim();
+            const lastCheck = new Date(lastCheckStr);
+            const diffMs = now.getTime() - lastCheck.getTime();
+            const diffHours = diffMs / (1000 * 60 * 60);
+            if (diffHours < 24) {
+                needsOnlineCheck = false;
+            }
+        }
+
+        if (needsOnlineCheck) {
+            console.log("Performing online validation...");
+            const encodedKey = Buffer.from(LICENSE_KEY!).toString('base64');
+            const url = `${BASE_URL}/api/licenses/validate/${encodeURIComponent(encodedKey)}`;
+
+            const response = await new Promise<any>((resolve, reject) => {
+                https.get(url, { timeout: 10000 }, (res) => {
+                    let data = '';
+                    res.on('data', (chunk) => data += chunk);
+                    res.on('end', () => {
+                        try {
+                            const result = JSON.parse(data);
+                            resolve(result);
+                        } catch (e) {
+                            reject(e);
+                        }
+                    });
+                }).on('error', reject).on('timeout', () => reject(new Error('Timeout')));
+            });
+
+            if (!response.valid) {
+                console.error("Online validation failed");
+                return false;
+            }
+
+            fs.writeFileSync(LAST_ONLINE_CHECK_FILE, now.toISOString());
+            console.log("Online validation successful");
+        }
+        return true;
+    } catch (error) {
+        console.error("Online validation error:", (error as Error).message);
+        return false;
+    }
+}
+
+async function validateLicenseFile(): Promise<any> {
+    if (!fs.existsSync(LICENSE_FILE)) {
+        console.log("License file not found, downloading...");
+        const downloadSuccess = await downloadLicense();
+        if (!downloadSuccess) {
+            throw new Error("Failed to download license file");
+        }
+    }
+
+    const encryptedContent = fs.readFileSync(LICENSE_FILE, 'utf8').trim();
+    const decryptedContent = hybridDecrypt(encryptedContent, MASTER_PRIVATE_KEY);
+    const data = JSON.parse(decryptedContent);
+
+    if (!data.license || !data.signature) {
+        throw new Error('Invalid license file format');
+    }
+
+    // Verify signature
+    const licenseJson = JSON.stringify(data.license);
+    const publicKey = crypto.createPublicKey({
+        key: Buffer.from(LICENSE_KEY!, 'base64'),
+        format: 'der',
+        type: 'spki'
+    });
+
+    const signature = data.signature;
+    const isValid = crypto.verify('sha256', Buffer.from(licenseJson), {
+        key: publicKey,
+        padding: crypto.constants.RSA_PKCS1_PSS_PADDING,
+        saltLength: crypto.constants.RSA_PSS_SALTLEN_MAX_SIGN
+    }, Buffer.from(signature, 'base64'));
+
+    if (!isValid) {
+        throw new Error('Signature verification failed');
+    }
+
+    // Check expiry
+    const issuedAt = new Date(data.license.issued_at);
+    const validityDays = data.license.validity_days;
+    const expiryDate = new Date(issuedAt);
+    expiryDate.setDate(expiryDate.getDate() + validityDays);
+    const now = new Date();
+
+    if (now > expiryDate) {
+        console.log("License expired, downloading new license...");
+        const reissueSuccess = await downloadLicense();
+        if (reissueSuccess) {
+            return await validateLicenseFile();
+        }
+        throw new Error('License has expired and reissue failed');
+    }
+
+    return {
+        valid: true,
+        license: data.license,
+        expiresAt: expiryDate.toISOString()
+    };
+}
+
+async function downloadLicense(): Promise<boolean> {
+    return new Promise((resolve) => {
+        const encodedKey = Buffer.from(LICENSE_KEY!).toString('base64');
+        const url = `${BASE_URL}/api/licenses/issue?encoded_license_key=${encodeURIComponent(encodedKey)}`;
+
+        https.get(url, (res) => {
+            if (res.statusCode !== 200) {
+                console.error(`Download failed with status: ${res.statusCode}`);
+                resolve(false);
+                return;
+            }
+
+            const fileStream = fs.createWriteStream(LICENSE_FILE);
+            res.pipe(fileStream);
+
+            fileStream.on('finish', () => {
+                fileStream.close();
+                console.log("License downloaded successfully");
+                resolve(true);
+            });
+
+            fileStream.on('error', (err) => {
+                console.error(`Download failed: ${err.message}`);
+                resolve(false);
+            });
+        }).on('error', (err) => {
+            console.error(`Download failed: ${err.message}`);
+            resolve(false);
+        });
+    });
+}
+
+export async function validateLicense(): Promise<any> {
+    try {
+        if (!LICENSE_KEY) {
+            return { valid: false, error: "LICENSE_KEY environment variable not set" };
+        }
+
+        // Always perform online validation first (if possible)
+        const onlineValid = await validateOnline();
+
+        // Perform offline validation
+        const fileResult = await validateLicenseFile();
+
+        return {
+            valid: fileResult.valid && onlineValid,
+            license: fileResult.license,
+            expiresAt: fileResult.expiresAt
+        };
+
+    } catch (error) {
+        return {
+            valid: false,
+            error: (error as Error).message
+        };
+    }
+}
+
+// Usage example:
+/*
+import { validateLicense } from './license-validator';
+
+async function main() {
+    const result = await validateLicense();
+    if (result.valid) {
+        console.log("License is valid");
+        console.log("License data:", result.license);
+        console.log("Expires at:", result.expiresAt);
+    } else {
+        console.error("License validation failed:", result.error);
+        process.exit(1);
+    }
+}
+
+main();
+*/

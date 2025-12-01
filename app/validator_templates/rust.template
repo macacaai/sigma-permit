@@ -1,0 +1,188 @@
+use std::env;
+use std::fs;
+use std::io::{self, Write};
+use std::path::Path;
+use reqwest::blocking;
+use serde::{Deserialize, Serialize};
+use base64::{Engine as _, engine::general_purpose};
+
+#[derive(Serialize, Deserialize)]
+struct LicenseData {
+    license: License,
+    signature: String,
+}
+
+#[derive(Serialize, Deserialize)]
+struct License {
+    id: String,
+    tenant_id: String,
+    issued_at: String,
+    validity_days: u32,
+    payload: serde_json::Value,
+}
+
+fn main() {
+    if validate_license() {
+        println!("Validation successful");
+        std::process::exit(0);
+    } else {
+        eprintln!("Validation failed");
+        std::process::exit(1);
+    }
+}
+
+fn validate_license() -> bool {
+    let license_key = match env::var("LICENSE_KEY") {
+        Ok(key) => key,
+        Err(_) => {
+            eprintln!("LICENSE_KEY environment variable not set");
+            return false;
+        }
+    };
+
+    let license_file = "./license.lic";
+    let mut downloaded = false;
+    validate_file(license_file, &license_key, &mut downloaded)
+}
+
+fn validate_file(file_path: &str, license_key: &str, downloaded: &mut bool) -> bool {
+    if !Path::new(file_path).exists() {
+        if *downloaded {
+            eprintln!("License file not found after download");
+            return false;
+        }
+        println!("License file not found, downloading...");
+        let download_success = download_license(license_key);
+        if !download_success {
+            eprintln!("Failed to download license");
+            return false;
+        }
+        *downloaded = true;
+    }
+
+    match fs::read_to_string(file_path) {
+        Ok(content) => {
+            match serde_json::from_str::<LicenseData>(&content) {
+                Ok(data) => {
+                    let license_json = serde_json::to_string(&data.license).unwrap();
+
+                    // Verify signature (placeholder - implement proper RSA verification)
+                    if !verify_signature(&license_json, &data.signature, license_key) {
+                        if !*downloaded {
+                            println!("Signature verification failed, downloading new license...");
+                            let download_success = download_license(license_key);
+                            if !download_success {
+                                eprintln!("Failed to download new license");
+                                return false;
+                            }
+                            *downloaded = true;
+                            return validate_file(file_path, license_key, downloaded);
+                        } else {
+                            eprintln!("Signature verification failed after download");
+                            return false;
+                        }
+                    }
+
+                    // Check expiry (placeholder - implement proper date checking)
+                    if !check_expiry(&data.license) {
+                        if !*downloaded {
+                            println!("License expired, downloading new license...");
+                            let download_success = download_license(license_key);
+                            if !download_success {
+                                eprintln!("Failed to download new license");
+                                return false;
+                            }
+                            *downloaded = true;
+                            return validate_file(file_path, license_key, downloaded);
+                        } else {
+                            eprintln!("License expired after download");
+                            return false;
+                        }
+                    }
+
+                    println!("License is valid");
+                    true
+                }
+                Err(e) => {
+                    eprintln!("Error parsing license: {}", e);
+                    if !*downloaded {
+                        println!("Downloading new license...");
+                        let download_success = download_license(license_key);
+                        if !download_success {
+                            eprintln!("Failed to download new license");
+                            return false;
+                        }
+                        *downloaded = true;
+                        return validate_file(file_path, license_key, downloaded);
+                    } else {
+                        eprintln!("Error parsing license after download");
+                        return false;
+                    }
+                }
+            }
+        }
+        Err(e) => {
+            eprintln!("Error reading license file: {}", e);
+            if !*downloaded {
+                println!("Downloading new license...");
+                let download_success = download_license(license_key);
+                if !download_success {
+                    eprintln!("Failed to download new license");
+                    return false;
+                }
+                *downloaded = true;
+                return validate_file(file_path, license_key, downloaded);
+            } else {
+                eprintln!("Error reading license file after download");
+                return false;
+            }
+        }
+    }
+}
+
+fn verify_signature(data: &str, signature: &str, public_key_der: &str) -> bool {
+    // Placeholder - implement proper RSA signature verification
+    true // TODO: Implement actual verification
+}
+
+fn check_expiry(license: &License) -> bool {
+    // Placeholder - implement proper date checking
+    true // TODO: Implement actual expiry check
+}
+
+fn download_license(license_key: &str) -> bool {
+    let encoded_key = general_purpose::STANDARD.encode(license_key.as_bytes());
+    let url = format!("{}/api/licenses/issue?encoded_license_key={}", "{base_url}", urlencoding::encode(&encoded_key));
+
+    match blocking::get(&url) {
+        Ok(response) => {
+            if response.status().is_success() {
+                match response.bytes() {
+                    Ok(bytes) => {
+                        match fs::write("./license.lic", &bytes) {
+                            Ok(_) => {
+                                println!("License downloaded successfully");
+                                true
+                            }
+                            Err(e) => {
+                                eprintln!("Error writing license file: {}", e);
+                                false
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Error reading response: {}", e);
+                        false
+                    }
+                }
+            } else {
+                eprintln!("Failed to download license: {}", response.status());
+                false
+            }
+        }
+        Err(e) => {
+            eprintln!("Download failed: {}", e);
+            false
+        }
+    }
+}
