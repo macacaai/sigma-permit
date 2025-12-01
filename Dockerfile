@@ -1,23 +1,5 @@
-# Multi-stage Docker build for Sigma Permit
+# Docker build for Sigma Permit API
 
-# Stage 1: Build the SvelteKit frontend
-FROM node:18-alpine AS frontend-builder
-
-WORKDIR /app/frontend
-
-# Copy package files
-COPY frontend/package*.json ./
-
-# Install dependencies
-RUN npm ci
-
-# Copy source code
-COPY frontend/ ./
-
-# Build the application
-RUN npm run build
-
-# Stage 2: Python runtime environment
 FROM python:3.13-slim
 
 # Set environment variables
@@ -45,9 +27,6 @@ RUN pip install --no-cache-dir -e .
 COPY app/ ./app/
 COPY main.py ./
 COPY seed.py ./
-
-# Copy built frontend from previous stage
-COPY --from=frontend-builder /app/frontend/build ./frontend/build
 
 # Copy font file
 COPY app/static/Elounda-Regular.otf ./app/static/
